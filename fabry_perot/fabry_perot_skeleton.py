@@ -1,109 +1,151 @@
-import numpy as np
+#!/usr/bin/env python3
 import matplotlib.pyplot as plt
+import numpy as np
+from scipy.signal import find_peaks
+from scipy.optimize import curve_fit
+import pandas as pd
 import os
-import copy
-import scipy.optimize as opt
-
-num_of_peaks = 5#number of peaks to be fitted 
-data_dir = "path/to/data/directory"#directory containing the data to be analysed. Please put all your data in this directory (and no other files!)
 
 
-wavelengths = []#list to contain wavelength data for all spectra
-intensities = []#list to contain intensity data for all spectra
-file_names = []#list to contain the file names to keep track of which spectrum is which
-'''
-A 'deep copy' of the data is also contained within a list, intensities_dc. This prevents the actual data being overwritten later
-'''
-intensities_dc =[]
-
-for file in os.listdir(data_dir):
-    #this for loop reads in the data and assigns it to the lists created above
-    data = np.genfromtxt(f"{data_dir}/{file}",delimiter=",",dtype=np.float64).T#read in the data
-    '''
-    appened the data read above onto the lists created above
-    
-    '''
-    file_names.append(file)
-
-def gauss(x,y0,mu,sigma,h):
-    '''
-    make this function return a normal distribution with:
-    vertical offset y0
-    mean value mu
-    standard deviation sigma
-    of height h
-    '''
-    return 0
+# User-input parameters
+# You should work these out by looking at the data and identifying a region of
+# peaks that you can attribute to the etalon.
+# This may be different for different spectrum measurements.
+peak_minimum_height = 0.05  # The minimum height for a peak to be considered
+peak_minimum_width = 10  # The minimum width for a peak to be considered [nm]
 
 
-#calculate the total number of files that will be processed
-num_of_files = len(os.listdir(data_dir))
+# Define a function of the form of a Gaussian plus a straight line (mx + c),
+# which we will use later to fit to transmisson peaks.
+def fit_func(x, mu, sigma, h, offset, slope):
+    exit('You need to define a fit function')  # Remove this
+    return mu*x + sigma  # Define your fitting function.
 
-for i in range(num_of_files):
-    #This for loop loops through each spectrum, plotting it and optimising for normal and lorentzian distributions
-    
-    #plot the measured data
-    plt.scatter(wavelengths[i],intensities[i],marker='x',color="g",label = "measured data")
 
-    for j in range(num_of_peaks):
-        #This for loop loops through the 'num_of_peaks' largest peaks in the spectra measured, trying to fit peaks to them
-        
-        '''
-        max_index stores the index of the highest point remaining in the distribution. intensities_dc is used here to keep track of which parts 
-        of the spectrum have been fitted and which haven't
-        '''
-        max_index = np.argmax(intensities_dc[i])
-        
-        #low_cut is how far below the maximum the fitting algorithm will look. high_cut is equivalent for above
-        low_cut = 200
-        high_cut = 200
-        
+# Read spectrum data from csv file.
+# You should put all the files to analyse in a folder with nothing else in
+# it, and provide the path to that folder below.
+data_dir = r'fabry_perot/data'
+for file_name in os.listdir(data_dir):
 
-        #The if/elif statements check whether the approximate peak location is within 200 channels of the bottom/top of the distribution
-        #and corrects if this is the case, preventing index errors later on
-        if max_index<=200:
-            low_cut = max_index
-        elif max_index> np.shape(intensities[i]):
-            high_cut = np.shape(intensities[i])-max_index
+    # Make sure the file is not hidden (such as .DS_Store on macOS).
+    if file_name[0] is ".":
+        continue  # This skips the current iteration of the loop.
 
-        #create the wavelength and intensity data subsets which are fitted by the scipy function
-        x_subset =wavelengths[i][max_index-low_cut:max_index+high_cut]
-        y_subset =intensities[i][max_index-low_cut:max_index+high_cut]
+    df_etalon = pd.read_csv(os.path.join(data_dir, file_name))
 
-        #find a way to make reasonable guesses for the parameters of the peak being fitted. 
-        #mu_guess is lalread done as an example
-        
-        mu_guess = wavelengths[i][max_index]
-        y0_guess = 0
-        sigma_guess = 0
-        h_guess = 0
+    # Extract wavelength and intensity values from the pandas dataframe and
+    # subtract background reference
+    wavelength = np.array(df_etalon.iloc[:, 0])
+    intensity = np.array(df_etalon.iloc[:, 1])
 
-        #params and params_covariance store the normal distribution function's optimum values for each peak
-        params = []
-        params_covariance = []
+    # Find peaks in spectrum corresponding to constructive interference
+    # in the etalon
+    peaks, peaks_properties = find_peaks(intensity,
+                                         width=peak_minimum_width,
+                                         height=peak_minimum_height)
+
+    if len(peaks) == 0:
+        print('No peaks found in {file}'.format(file=file_name))
+        continue
+
+    # Find first and last peaks and set lower and upper limits for plot
+    first_peak, last_peak = peaks[0], peaks[-1]
+    lower_limit = first_peak - peak_minimum_width
+    upper_limit = last_peak + peak_minimum_width
+
+    plt.scatter(wavelength[lower_limit:upper_limit],  # x data
+                intensity[lower_limit:upper_limit],  # y data
+                s=0.5)  # datapoint size in pt
+
+    # Create empty lists to fill with the lambda_0, fsr and fwhm values
+    lambda_0 = []
+    free_spectral_range = []
+    full_width_half_maximum = []
+
+    # Iterate over the peaks we identified to determine lambda_0, fsr and fwhm
+    for i in range(len(peaks) - 1):
+        # Set current and next peak location
+        peak = peaks[i]
+        next_peak = peaks[i + 1]
+
+        # Find midpoint and separation of each adjacent pair of peaks. Think
+        # about these - is there a better way of calculating either of these
+        # values?
+        midpoint = (wavelength[peak] + wavelength[next_peak]) / 2
+        separation = wavelength[next_peak] - wavelength[peak]
+
+        # Find the separation beteen the two peaks in terms of data points
+        dp_separation = next_peak - peak
+
+        # Calculate lower and upper limit to use for peak fitting
+        peak_lower_limit = int(peak - dp_separation/2)
+        peak_upper_limit = int(peak + dp_separation/2)
+
+        # Slice the wavelength and intensity data to obtain a region around the
+        # peak, to which we will try to fit the function we defined earlier.
+        peak_x = wavelength[peak_lower_limit:peak_upper_limit]
+        peak_y = intensity[peak_lower_limit:peak_upper_limit]
+
+        # Make calculations for initial guesses. Think about these values and
+        # why they comprise reasonable initial values.
+        initial_mu = wavelength[peak]
+        initial_sigma = (max(peak_x) - min(peak_x))/2
+        initial_h = (max(peak_y) - min(peak_y))
+        initial_offset = min(peak_y)
+        initial_slope = peak_y[-1] - peak_y[0]
+
+        # Pack all the initial guesses together into a list which we will pass
+        # to the cirve_fit function. You should adjust them here in order to
+        # find the correct minimisation.
+        initial_guesses = [
+            initial_mu,
+            initial_sigma,
+            initial_h,
+            initial_offset,
+            initial_slope
+        ]
+
         try:
-            #attempt to fit the data
-            params, params_covariance = opt.curve_fit(gauss,x_subset,y_subset,p0=[y0_guess,mu_guess,sigma_guess,h_guess])
-        except RuntimeError:
-            #if the peak could not be fitted (often because the fit is not "good enough"), a RuntimeErro is raised.
-            # This exception catches this error
-            print(f"Could not fit a peak for {file_names[i]}")
-        else:
-            #if the peak has been successfully fit, plot the data
-            if j==0:
-                plt.plot(x_subset,gauss(x_subset,params[0],params[1],params[2],params[3]),label =f"Normal distributions",color='r')
-            else:
-                plt.plot(x_subset,gauss(x_subset,params[0],params[1],params[2],params[3]),color='r')
+            # Fit the Gaussian to the region around the peak
+            params, params_covariance = curve_fit(
+                fit_func,  # The function to fit
+                peak_x,  # The x data
+                peak_y,  # The y data
+                p0=initial_guesses,  # Initial parameters
+                maxfev=10000  # Max iterations
+            )
+        except Exception:
+            # If the fit fails, print out a message.
+            print('curve_fit failed for curve {} \
+                   in file {}'.format(i, file_name))
+            continue
 
-            print('\nGaussian:')
-            print(f"y0 estimated to be {params[0]} +/- {params_covariance[0][0]}")
-            '''
-            print out the rest of the optimum values found by scipy            
-            '''
+        # Append values to lists
+        lambda_0.append(midpoint)
+        free_spectral_range.append(separation)
 
-        for k in range(low_cut+high_cut):
-            #this for loop sets all values in our copy of the intensities list to the minimum value in the array.
-            #This stops this peaks being fitted again.
-            intensities_dc[i][k+max_index-low_cut] = np.min(intensities_dc)
+        # Calculate FWHM from the standard deviation of the Gaussian fit, and
+        # append it to a list
+        fwhm = 2 * np.sqrt(2 * np.log(2)) * params[1]
+        full_width_half_maximum.append(fwhm)
 
-    #plot the data and include axis labeles and a title for the graph
+        # Plot the fit for each peak
+        x = np.linspace(min(peak_x), max(peak_x), 100)
+        plt.plot(x, fit_func(x, *params), c='r')
+
+    # We now construct a data object which we can save to a file
+    peaks_data = {'lambda_0': lambda_0,
+                  'fsr': free_spectral_range,
+                  'fwhm': full_width_half_maximum}
+
+    # Use pandas to write the data object to a csv file
+    try:
+        # Try to make a folder to store the output in
+        os.makedirs('output')
+    except FileExistsError:
+        # If the folder already exists, just skip
+        pass
+    df_output = pd.DataFrame(peaks_data)
+    df_output.to_csv('output/characterised_peaks_{}'.format(file_name))
+    plt.show()
