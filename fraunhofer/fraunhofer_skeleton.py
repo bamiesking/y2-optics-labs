@@ -16,6 +16,8 @@ estimated_intensity = 1.  	# Should be ~1 from normalisation (see later)
 # Read in image file as a 2D array.
 # You will need to change this to read in your file
 img = mpimg.imread('./FD_test_25.05.2021_100um.tif')
+imgplot = plt.imshow(img)   # Plot 2D image as colour map
+plt.show()
 
 
 # Sum all rows in 2D array to make 1D intensity plot as a function of pixel
