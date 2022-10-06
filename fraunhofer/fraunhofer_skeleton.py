@@ -41,7 +41,7 @@ for i in range(0, n_pix):
 # Note that numpy's sinc function already has a factor of pi, such that
 # np.sinc(x) is equal to sin(pi*x)/(pi*x)
 # https://numpy.org/doc/stable/reference/generated/numpy.sinc.html
-# You will need to edit this to include the wavelength and slit width as
+# You will need to edit this to include the intensity and slit width as
 # arguments and use them in the function. You might also want to consider a
 # contribution from background.
 def sinc2_func(x, intensity, constant):
